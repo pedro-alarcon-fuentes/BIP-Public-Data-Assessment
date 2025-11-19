@@ -10,6 +10,7 @@ from community import community_louvain
 from data_processing import load_and_prepare_companies
 from ai_engine import setup_semantic_search, search_companies
 from ai_engine import enrich_graph_with_name_similarity 
+from scraper import scrape_and_save
 
 
 # --- 2. CONFIGURATION ---
@@ -155,8 +156,8 @@ def run_chatbot():
     
     # Step 1: Load optimized data for the chatbot
     print(f"Loading data for chatbot (sample of {CHATBOT_SAMPLE_SIZE})...")
-    companies_df1 = load_and_prepare_companies(DATA_PATH1, sample_size=CHATBOT_SAMPLE_SIZE)
-    companies_df2 = load_and_prepare_companies(DATA_PATH2, sample_size=CHATBOT_SAMPLE_SIZE)
+    companies_df1 = load_and_prepare_companies(DATA_PATH1, sample_size=CHATBOT_SAMPLE_SIZE, clean_csv_name="companies_clean_sampled.csv")
+    companies_df2 = load_and_prepare_companies(DATA_PATH2, sample_size=CHATBOT_SAMPLE_SIZE, clean_csv_name="companies_clean_sampled2.csv")
     companies_df = pd.concat([companies_df1, companies_df2], ignore_index=True)
 
     # Step 2: Set up the AI engine
@@ -180,12 +181,23 @@ def run_chatbot():
         
         if not results.empty:
             print("\nHere are the 5 most relevant results:")
+            company_names = []
+
             for _, row in results.iterrows():
+                name = row['company_name']
+                company_names.append(name)
+
                 print(f"  - Name: {row['company_name']} (Similarity: {row['similarity_score']:.2f})")
                 print(f"    Address 1: {row.get('company_address_1', 'N/A')}")
                 print(f"    Address 2: {row.get('company_address_2', 'N/A')}")
                 print(f"    Address 3: {row.get('company_address_3', 'N/A')}")
                 print(f"    Address 4: {row.get('company_address_4', 'N/A')}")
+            
+            print("\nStarting web scraping for the found companies...\n")
+            for name in company_names:
+                filename = scrape_and_save(name, location)
+                print(f" → Scraped data saved to: {filename}")
+
         else:
             print("I could not find results for your search.")
 
@@ -207,7 +219,9 @@ if __name__ == "__main__":
             print("\n--- STARTING GRAPH ANALYSIS MODULE ---")
             
             # Step 1: Load data
-            companies_df = load_and_prepare_companies(DATA_PATH, sample_size=GRAPH_SAMPLE_SIZE)
+            companies_df1 = load_and_prepare_companies(DATA_PATH1, sample_size=CHATBOT_SAMPLE_SIZE)
+            companies_df2 = load_and_prepare_companies(DATA_PATH2, sample_size=CHATBOT_SAMPLE_SIZE)
+            companies_df = pd.concat([companies_df1, companies_df2], ignore_index=True)
             
             # Step 2: Create the structural graph
             company_graph = create_graph_from_data(companies_df)
