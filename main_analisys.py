@@ -2,6 +2,7 @@
 
 # --- 1. IMPORTS ---
 import networkx as nx
+import pandas as pd
 import matplotlib.pyplot as plt
 from itertools import combinations
 from community import community_louvain
@@ -12,7 +13,8 @@ from ai_engine import enrich_graph_with_name_similarity
 
 
 # --- 2. CONFIGURATION ---
-DATA_PATH = "BIP-Public-Data-Assessment/companies.csv"
+DATA_PATH1 = "BIP-Public-Data-Assessment/companies.csv"
+DATA_PATH2 = "BIP-Public-Data-Assessment/romania_companies.csv"
 ID_COLUMN = 'company_num'
 GRAPH_SAMPLE_SIZE = 100
 CHATBOT_SAMPLE_SIZE = 5000
@@ -153,8 +155,10 @@ def run_chatbot():
     
     # Step 1: Load optimized data for the chatbot
     print(f"Loading data for chatbot (sample of {CHATBOT_SAMPLE_SIZE})...")
-    companies_df = load_and_prepare_companies(DATA_PATH, sample_size=CHATBOT_SAMPLE_SIZE)
-    
+    companies_df1 = load_and_prepare_companies(DATA_PATH1, sample_size=CHATBOT_SAMPLE_SIZE)
+    companies_df2 = load_and_prepare_companies(DATA_PATH2, sample_size=CHATBOT_SAMPLE_SIZE)
+    companies_df = pd.concat([companies_df1, companies_df2], ignore_index=True)
+
     # Step 2: Set up the AI engine
     model, embeddings, company_ids, id_to_idx = setup_semantic_search(companies_df)
     
