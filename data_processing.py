@@ -25,7 +25,7 @@ def normalize_address(address_str):
     address_str = address_str.lower().replace('.', '').replace(',', '')
     address_str = address_str.replace('co ', 'county ')
     tokens = address_str.split()
-    stop_words = {'ireland', 'irl'} #! If you are using databases with other countries aswell, you should add them to the stop_words
+    stop_words = {'ireland', 'irl', 'romania', 'ro'} #! If you are using databases with other countries aswell, you should add them to the stop_words
     unique_tokens = set(tokens)
     cleaned_tokens = [token for token in unique_tokens if token not in stop_words]
     cleaned_tokens.sort()
