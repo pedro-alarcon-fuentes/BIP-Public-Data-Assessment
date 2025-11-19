@@ -9,10 +9,11 @@ from community import community_louvain
 from data_processing import load_and_prepare_companies
 from ai_engine import setup_semantic_search, search_companies
 from ai_engine import enrich_graph_with_name_similarity 
+from scraper import scrape_and_save
 
 
 # --- 2. CONFIGURATION ---
-DATA_PATH = "BIP-Public-Data-Assessment/companies.csv"
+DATA_PATH = "companies.csv"
 ID_COLUMN = 'company_num'
 GRAPH_SAMPLE_SIZE = 100
 CHATBOT_SAMPLE_SIZE = 5000
@@ -176,12 +177,23 @@ def run_chatbot():
         
         if not results.empty:
             print("\nHere are the 5 most relevant results:")
+            company_names = []
+
             for _, row in results.iterrows():
+                name = row['company_name']
+                company_names.append(name)
+
                 print(f"  - Name: {row['company_name']} (Similarity: {row['similarity_score']:.2f})")
                 print(f"    Address 1: {row.get('company_address_1', 'N/A')}")
                 print(f"    Address 2: {row.get('company_address_2', 'N/A')}")
                 print(f"    Address 3: {row.get('company_address_3', 'N/A')}")
                 print(f"    Address 4: {row.get('company_address_4', 'N/A')}")
+            
+            print("\nStarting web scraping for the found companies...\n")
+            for name in company_names:
+                filename = scrape_and_save(name, location)
+                print(f" → Scraped data saved to: {filename}")
+
         else:
             print("I could not find results for your search.")
 
