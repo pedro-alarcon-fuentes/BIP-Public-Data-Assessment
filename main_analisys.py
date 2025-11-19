@@ -12,7 +12,7 @@ from ai_engine import enrich_graph_with_name_similarity
 
 
 # --- 2. CONFIGURATION ---
-DATA_PATH = "proyect/companies.csv"
+DATA_PATH = "BIP-Public-Data-Assessment/companies.csv"
 ID_COLUMN = 'company_num'
 GRAPH_SAMPLE_SIZE = 100
 CHATBOT_SAMPLE_SIZE = 5000
