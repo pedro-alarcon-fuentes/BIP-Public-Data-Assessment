@@ -3,6 +3,7 @@
 # --- 1. IMPORTS ---
 import networkx as nx
 import pandas as pd
+import pandas as pd
 import matplotlib.pyplot as plt
 from itertools import combinations
 from community import community_louvain
@@ -288,6 +289,9 @@ if __name__ == "__main__":
             print("\n--- STARTING GRAPH ANALYSIS MODULE ---")
             
             # Step 1: Load data
+            companies_df1 = load_and_prepare_companies(DATA_PATH1, sample_size=CHATBOT_SAMPLE_SIZE)
+            companies_df2 = load_and_prepare_companies(DATA_PATH2, sample_size=CHATBOT_SAMPLE_SIZE)
+            companies_df = pd.concat([companies_df1, companies_df2], ignore_index=True)
             companies_df1 = load_and_prepare_companies(DATA_PATH1, sample_size=CHATBOT_SAMPLE_SIZE)
             companies_df2 = load_and_prepare_companies(DATA_PATH2, sample_size=CHATBOT_SAMPLE_SIZE)
             companies_df = pd.concat([companies_df1, companies_df2], ignore_index=True)
