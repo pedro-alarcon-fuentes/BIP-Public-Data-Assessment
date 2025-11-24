@@ -1,0 +1,6 @@
+.env
+.venv
+__pycache__
+company_embeddings.pkl
+companies_clean_sampled.csv
+companies_clean_sampled2.csv

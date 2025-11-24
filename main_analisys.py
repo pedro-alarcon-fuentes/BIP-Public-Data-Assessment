@@ -2,21 +2,31 @@
 
 # --- 1. IMPORTS ---
 import networkx as nx
+import pandas as pd
 import matplotlib.pyplot as plt
 from itertools import combinations
 from community import community_louvain
+from transformers import pipeline
+import google.generativeai as genai     
+import os
+from dotenv import load_dotenv
+import graphistry
 # Imports from other files
 from data_processing import load_and_prepare_companies
-from ai_engine import setup_semantic_search, search_companies
-from ai_engine import enrich_graph_with_name_similarity 
+from ai_engine import setup_semantic_search, search_companies, enrich_graph_with_name_similarity, summarize_with_llm 
+from ai_engine import parse_user_intent
+from scraper import scrape_and_save
 
 
 # --- 2. CONFIGURATION ---
-DATA_PATH = "BIP-Public-Data-Assessment/companies.csv"
+DATA_PATH1 = "BIP-Public-Data-Assessment/datasets/companies.csv"
+DATA_PATH2 = "BIP-Public-Data-Assessment/datasets/romania_companies.csv"
 ID_COLUMN = 'company_num'
 GRAPH_SAMPLE_SIZE = 100
-CHATBOT_SAMPLE_SIZE = 5000
+CHATBOT_SAMPLE_SIZE = 80000
 
+env_path = "BIP-Public-Data-Assessment/.env"
+load_dotenv(env_path) 
 # --- 3. MAIN LOGIC ---
 
 def create_graph_from_data(df):
@@ -92,98 +102,173 @@ def create_graph_from_data(df):
 
 def visualize_community_graph(G):
     """
-    Detects communities in the graph and creates a visualization.
+    Detects communities in the graph and creates a static visualization with Matplotlib.
 
-    Uses the Louvain algorithm to find clusters, then draws
-    the graph coloring each cluster and adjusting node sizes
-    and edge thickness.
+    Uses the Louvain algorithm to find clusters, then draws the graph coloring each
+    cluster, adjusting node size according to their importance (degree) and edge width
+    according to semantic similarity.
     """
     if G.number_of_nodes() == 0:
         print("The graph is empty, cannot visualize.")
         return
 
-    print("\nStarting advanced visualization by clusters...")
+    print("\nStarting static visualization with Matplotlib...")
 
-    # 1. COMMUNITY DETECTION (CLUSTERS)
+    # --- 1. GRAPH ANALYSIS (Calculations) ---
     print("Detecting communities with the Louvain algorithm...")
     # 'best_partition' returns a dictionary: {node_id: community_id}
     partition = community_louvain.best_partition(G)
-    
-    # Get the number of communities found
     num_communities = len(set(partition.values()))
     print(f"Found {num_communities} communities/clusters.")
 
-    # 2. PREPARATION OF VISUAL ATTRIBUTES
+    # --- 2. PREPARATION OF VISUAL ATTRIBUTES FOR MATPLOTLIB ---
+    # We create attribute lists in the same order as G.nodes() and G.edges()
     
-    # Assign a color to each community for the nodes
-    node_colors = [partition[node] for node in G.nodes()]
+    # a) Node colors, based on their community ID
+    node_colors = [partition.get(node) for node in G.nodes()]
     
-    # Assign node size based on degree (number of connections)
-    node_sizes = [G.degree(node) * 20 + 50 for node in G.nodes()]  # Multiplier for visibility
+    # b) Node sizes, based on their degree (number of connections)
+    node_sizes = [G.degree(node) * 20 + 50 for node in G.nodes()]  # Multiplier to make it visible
     
-    # Assign edge transparency based on semantic similarity
-    # Edges with high similarity will be more opaque.
-    edge_alphas = [G.edges[u, v].get('name_similarity', 0.1) for u, v in G.edges()]
+    # c) Edge widths, based on semantic similarity
+    # Edges with high similarity will be thicker.
+    edge_widths = [1 + G.edges[u, v].get('name_similarity', 0) * 3 for u, v in G.edges()]
 
-    # 3. LAYOUT AND DRAWING
-    print("Computing force-directed layout (may take a moment)...")
-    # Spring layout is key for the "clusters" appearance
-    pos = nx.spring_layout(G, k=0.5, iterations=50, seed=2409)
+    # --- 3. LAYOUT AND DRAWING ---
+    print("Computing spring layout (may take a moment)...")
+    # The spring layout is key to the "clusters" appearance.
+    # A 'seed' makes the layout reproducible each time you run it.
+    pos = nx.spring_layout(G, k=0.6, iterations=50, seed=42)
 
-    plt.figure(figsize=(20, 20))
+    # Create the figure where the graph will be drawn
+    plt.figure(figsize=(25, 25))
     
-    # Draw the graph with all visual attributes
-    nx.draw_networkx_nodes(G, pos, node_color=node_colors, node_size=node_sizes, cmap=plt.cm.jet)
-    nx.draw_networkx_edges(G, pos, alpha=0.5, edge_color='gray', width=[alpha * 2 for alpha in edge_alphas])
+    # a) Draw the edges
+    nx.draw_networkx_edges(
+        G,
+        pos,
+        width=edge_widths,
+        alpha=0.3,          
+        edge_color='gray'
+    )
     
-    # Add labels to the most important nodes to avoid clutter
-    central_nodes = {node for node, degree in G.degree() if degree > 5}  # Degree threshold
-    labels = {node: G.nodes[node]['company_name'] for node in central_nodes}
-    nx.draw_networkx_labels(G, pos, labels=labels, font_size=8, font_color='black')
+    # b) Draw the nodes
+    nx.draw_networkx_nodes(
+        G,
+        pos,
+        node_color=node_colors,
+        node_size=node_sizes,
+        cmap=plt.cm.viridis  # The color map used for the clusters
+    )
     
-    plt.title(f"Company Graph by Communities (Clusters) - {num_communities} clusters found")
-    plt.box(False)
+    # c) Draw the labels
+    labels_to_draw = {}
+    # Threshold: only show names of nodes with more than 5 connections
+    degree_threshold = 5 
+    for node, data in G.nodes(data=True):
+        if G.degree(node) > degree_threshold:
+            labels_to_draw[node] = data.get('company_name', '')
+            
+    nx.draw_networkx_labels(
+        G,
+        pos,
+        labels=labels_to_draw,
+        font_size=10,
+        font_color='black'
+    )
+    
+    plt.box(False)  # Hide the graph frame
+    print("Displaying the graph...")
     plt.show()
 
 def run_chatbot():
     """
     Main function that executes the chatbot lifecycle.
+    Now accepts input in natural language.
     """
     print("\n--- STARTING CHATBOT MODULE ---")
+
+    api_key = os.getenv("GOOGLE_API_KEY")
+
     
-    # Step 1: Load optimized data for the chatbot
-    print(f"Loading data for chatbot (sample of {CHATBOT_SAMPLE_SIZE})...")
-    companies_df = load_and_prepare_companies(DATA_PATH, sample_size=CHATBOT_SAMPLE_SIZE)
+    if not api_key:
+        print("Critical Error: GOOGLE_API_KEY environment variable not found.")
+        print("Make sure you have a .env file with the format: GOOGLE_API_KEY='your_key'")
+        return
     
-    # Step 2: Set up the AI engine
+    try:
+        genai.configure(api_key=api_key)
+        llm_model = genai.GenerativeModel('gemini-2.5-flash')
+        print("Generative AI Model (Gemini) loaded successfully.")
+    except Exception as e:
+        print(f"Error configuring Gemini model. Verify your API key. Error: {e}")
+        return
+
+    
+    # Step 1: Load data
+    companies_df1 = load_and_prepare_companies(DATA_PATH1, sample_size=CHATBOT_SAMPLE_SIZE, clean_csv_name="companies_clean_sampled.csv")
+    companies_df2 = load_and_prepare_companies(DATA_PATH2, sample_size=CHATBOT_SAMPLE_SIZE, clean_csv_name="companies_clean_sampled2.csv")
+    companies_df = pd.concat([companies_df1, companies_df2], ignore_index=True)
+    
+    # Step 2: Prepare the SEMANTIC SEARCH engine (embeddings)
     model, embeddings, company_ids, id_to_idx = setup_semantic_search(companies_df)
     
-    # Step 3: Interactive loop
+    # Step 3: Prepare the INTENT ANALYSIS engine (NER)
+    print("Loading Named Entity Recognition (NER) model...")
+    # 'dslim/bert-base-NER' is a very popular and robust model.
+    ner_pipeline = pipeline("ner", model="dslim/bert-base-NER", grouped_entities=True)
+    print("Cargando modelo de Resumen (Summarization)...")
+    summarizer = pipeline("summarization", model="facebook/bart-large-cnn")
+    print("Todos los modelos de IA están listos.")
+
+    # Step 4: Interactive loop
     print("\n--- Company Search Chatbot Activated ---")
-    print("Hello! Tell me where you want to search for companies and what type.")
+    print("Hello! Ask me a question like: 'Find technology companies near Dublin'")
     print("Type 'exit' to return to the main menu.")
     
     while True:
-        location = input("\nEnter the location (e.g., Dublin): ")
-        if location.lower() in ['salir', 'exit', 'quit']:
+        user_input = input("\n> ")
+        if user_input.lower() in ['exit', 'quit']:
             break
             
-        query = input(f"What type of companies are you looking for in '{location}'? (e.g., Cybersecurity): ")
-        if query.lower() in ['salir', 'exit', 'quit']:
-            break
+        # Analyze the user's input to extract location and topic
+        location, query = parse_user_intent(user_input, ner_pipeline)
+        
+        # Check if we understood the question
+        if not location or not query:
+            print("Sorry, I didn't quite understand your question. Please make sure to include a location and a company type.")
+            continue
             
+        # Perform the search with the extracted information
         results = search_companies(query, location, companies_df, model, embeddings, id_to_idx, top_k=5)
         
+        # Display the results
         if not results.empty:
-            print("\nHere are the 5 most relevant results:")
+            print(f"\n¡Claro! He encontrado la siguiente información sobre '{query}' en '{location}':")
+
+            company_names = []
             for _, row in results.iterrows():
-                print(f"  - Name: {row['company_name']} (Similarity: {row['similarity_score']:.2f})")
-                print(f"    Address 1: {row.get('company_address_1', 'N/A')}")
-                print(f"    Address 2: {row.get('company_address_2', 'N/A')}")
-                print(f"    Address 3: {row.get('company_address_3', 'N/A')}")
-                print(f"    Address 4: {row.get('company_address_4', 'N/A')}")
+                name = row['company_name']
+                company_names.append(name)
+            print("\nStarting web scraping for the found companies...\n")
+            for name in company_names:
+                filename = scrape_and_save(name, location)
+                print(f" → Scraped data saved to: {filename}")
+
+            for index, row in results.iterrows():
+                company_name = row['company_name']
+                print(f"\n--- Summarizing information for: {company_name} ---")
+                
+                summary = summarize_with_llm(company_name, llm_model)
+                
+                print(f"🔹 **{company_name}**:")
+                print(f"   {summary}")
         else:
-            print("I could not find results for your search.")
+            print("I couldn't find results for your search. Try with other terms.")
+
+    print("\n--- Chatbot deactivated. ---")
+
+
 
     print("\n--- Chatbot deactivated. Returning to main menu. ---")
 
@@ -203,7 +288,9 @@ if __name__ == "__main__":
             print("\n--- STARTING GRAPH ANALYSIS MODULE ---")
             
             # Step 1: Load data
-            companies_df = load_and_prepare_companies(DATA_PATH, sample_size=GRAPH_SAMPLE_SIZE)
+            companies_df1 = load_and_prepare_companies(DATA_PATH1, sample_size=CHATBOT_SAMPLE_SIZE)
+            companies_df2 = load_and_prepare_companies(DATA_PATH2, sample_size=CHATBOT_SAMPLE_SIZE)
+            companies_df = pd.concat([companies_df1, companies_df2], ignore_index=True)
             
             # Step 2: Create the structural graph
             company_graph = create_graph_from_data(companies_df)

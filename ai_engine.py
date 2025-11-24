@@ -4,6 +4,8 @@ import pandas as pd
 import os
 from sentence_transformers import SentenceTransformer, util
 import pickle
+import re
+import json 
 
 MODEL_NAME = 'all-MiniLM-L6-v2'
 EMBEDDINGS_FILE = 'company_embeddings.pkl'
@@ -112,3 +114,140 @@ def enrich_graph_with_name_similarity(G):
             
     print("Edge enrichment completed.")
     return G
+
+def parse_user_intent(sentence, ner_pipeline):
+    """
+    Analyzes a user sentence to extract the location and search topic.
+    Implements a precise strategy to detect the topic based on keywords.
+    """
+    print(f"Analyzing user intent: '{sentence}'")
+    
+    # --- LOCATION EXTRACTION ---
+    location = None
+    processed_sentence = sentence.title()
+    ner_results = ner_pipeline(processed_sentence)
+    location_parts = [entity['word'] for entity in ner_results if entity['entity_group'] in ['LOC', 'GPE']]
+    if location_parts:
+        location = " ".join(location_parts)
+    else:
+        # Plan B (Gazetteer)
+        GAZETTEER = ["Dublin 2", "Dublin", "Cork", "Galway", "Limerick", "Waterford", "Bulgaria", "Spain"]
+        sentence_lower = sentence.lower()
+        for place in GAZETTEER:
+            if place.lower() in sentence_lower:
+                location = place
+                break
+    
+    if not location:
+        print("--> Intent detected: Could not find a location!")
+        return None, None
+
+    # --- TOPIC EXTRACTION ---
+    query = None
+    
+    # 1. Define anchor words
+    anchor_words = ['companies', 'company', 'businesses', 'business', 'firms', 'firm', 'startups', 'startup', 'agencies', 'agency', 'sector']
+    
+    # Prepare the sentence for topic analysis (lowercase and without location)
+    sentence_for_query = sentence.lower().replace(location.lower(), "")
+    tokens = sentence_for_query.split()
+    
+    # 2. Search for the first anchor word
+    anchor_index = -1
+    for i, token in enumerate(tokens):
+        # Remove punctuation for robust matching (e.g. "companies.")
+        cleaned_token = token.strip('.,?!')
+        if cleaned_token in anchor_words:
+            anchor_index = i
+            break
+            
+    # 3. If anchor found, extract the topic
+    if anchor_index != -1:
+        print("Anchor word found. Extracting precise topic...")
+        # Define window size (1 to 3 words before the anchor)
+        start_index = max(0, anchor_index - 3)
+        topic_words = tokens[start_index:anchor_index]
+        query = " ".join(topic_words)
+    
+    # 4. If no anchor, clean the sentence as before
+    else:
+        print("Anchor word not found. Using general cleanup as fallback.")
+        query = sentence_for_query
+        stop_words = ['in ', 'at ', 'near ', 'around ', 'find ', 'look for ', 'looking for ', 'i want to know about ', 'there', 'are there any']
+        for word in stop_words:
+            query = query.replace(word, '')
+    
+    # Final cleanup
+    query = query.strip('.,?! ')
+    
+    # If query is empty after all processing, it's an error. Use a generic one.
+    if not query:
+        query = "business"
+
+    print(f"--> Intent detected: Location='{location}', Topic='{query}'")
+    return location, query
+
+    
+def summarize_with_llm(company_name, generative_model, scrape_data_path="scraped_data"):
+    """
+    Uses an LLM (Gemini) to read scraping data and generate a natural summary.
+
+    Args:
+        company_name (str): The company name to search for its JSON file.
+        generative_model (GenerativeModel): The initialized Gemini model.
+        scrape_data_path (str): The path to the folder containing JSON files.
+
+    Returns:
+        str: A conversational summary about the company.
+    """
+    def sanitize_name(name):
+        name = name.lower()
+        name = re.sub(r'[^a-z0-9]+', '', name)
+        return name
+
+    sanitized_target_name = sanitize_name(company_name)
+    found_path = None
+    for filename in os.listdir(scrape_data_path):
+        if filename.endswith(".json"):
+            sanitized_filename = sanitize_name(os.path.splitext(filename)[0])
+            if sanitized_filename == sanitized_target_name:
+                found_path = os.path.join(scrape_data_path, filename)
+                break
+    
+    if not found_path:
+        return "No detailed scraping data found for this company."
+
+    # Read the JSON content
+    try:
+        with open(found_path, 'r', encoding='utf-8') as f:
+            scraped_data_list = json.load(f)
+            scraped_data_str = json.dumps(scraped_data_list, indent=2)
+    except Exception as e:
+        return f"Error reading or processing the JSON file: {e}"
+
+    # --- PROMPT DESIGN FOR GEMINI ---
+    prompt = f"""
+    You are an expert and concise business analyst, that utilises OSINT. Your task is to summarize company information based on web scraping data provided in JSON format.
+
+    Here is the data for "{company_name}":
+    ```json
+    {scraped_data_str}
+    ```
+
+    Please analyze the JSON and write a summary of 2-3 sentences in a natural and professional tone. Ignore irrelevant text such as menus, privacy policies, or error messages. Focus on:
+    1. What is the company and what is its main activity?
+    2. What key services or products does it offer?
+    3. Where is it located or what markets does it serve?
+
+    If the data is insufficient to form a good summary, simply indicate that the information found is limited. If this happens, fill in some information from your knowledge base that could be useful to the user.
+
+
+    Summary:
+    """
+
+    # --- CALL TO GEMINI API ---
+    try:
+        response = generative_model.generate_content(prompt)
+        return response.text.strip()
+    except Exception as e:
+        return f"Error contacting the generative AI API: {e}"

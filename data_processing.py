@@ -25,7 +25,7 @@ def normalize_address(address_str):
     address_str = address_str.lower().replace('.', '').replace(',', '')
     address_str = address_str.replace('co ', 'county ')
     tokens = address_str.split()
-    stop_words = {'ireland', 'irl'} #! If you are using databases with other countries aswell, you should add them to the stop_words
+    stop_words = {'ireland', 'irl', 'romania', 'ro'}
     unique_tokens = set(tokens)
     cleaned_tokens = [token for token in unique_tokens if token not in stop_words]
     cleaned_tokens.sort()
@@ -54,11 +54,10 @@ def load_and_prepare_companies(original_path, sample_size=None, clean_csv_name="
         print(f"Reducing to a random sample of {sample_size} rows.")
         df = df.sample(n=sample_size, random_state=2409)
     
-    # --- SIMPLIFIED CLEANING SECTION ---
+    # --- CLEANING SECTION ---
     print("Starting basic data cleaning...")
     
     # 1. Clean address columns: Only fill null values.
-    #    This is crucial for the 'melt' operation to work correctly later
     address_cols = ['company_address_1', 'company_address_2', 'company_address_3', 'company_address_4']
     for col in address_cols:
         if col in df.columns:
