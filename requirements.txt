@@ -1,0 +1,22 @@
+# -- Core Data & Graph Libraries --
+pandas
+networkx
+matplotlib
+python-louvain
+
+# -- AI & Machine Learning --
+transformers
+torch
+sentence-transformers
+google-generativeai
+
+# -- Web Scraping --
+requests
+beautifulsoup4
+serpapi-python
+
+# -- Utilities & Environment --
+python-dotenv
+
+# -- Advanced Visualization --
+graphistry

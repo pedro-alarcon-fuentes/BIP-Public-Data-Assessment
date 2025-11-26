@@ -3,13 +3,17 @@ import requests
 from bs4 import BeautifulSoup
 import re
 import os
+from dotenv import load_dotenv
+
+env_path = "BIP-Public-Data-Assessment/.env"
+load_dotenv(env_path) 
 
 def google_search(query, num_results=10):
     url = "https://serpapi.com/search"
 
     params = {
         "q": query,
-        "api_key": "28c73a587706719d4e6d4c15bb1c9935fedcf8374b3e597a57ebca9a5b5cdf5d",
+        "api_key": os.getenv("SCRAP_KEY"),
         "num": num_results
     }
     response = requests.get(url, params=params)
